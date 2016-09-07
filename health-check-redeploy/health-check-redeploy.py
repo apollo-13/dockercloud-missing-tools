@@ -8,13 +8,15 @@ class HealthCheckRedeploy:
     containers = []
     service = None
     websocket = None
+    completedHealthChecks = 0
 
     healthCheck = 'off'
     healthCheckPort = 80
     healthCheckUrlPath = ''
     healthCheckTimeout = 600
+    healthCheckContainersCount = None
 
-    def __init__(self, stackName, serviceName, healthCheck = None, healthCheckPort = None, healthCheckUrlPath = None, healthCheckTimeout = None):
+    def __init__(self, stackName, serviceName):
 
         stacks = dockercloud.Stack.list(name=stackName)
         if len(stacks) == 0:
@@ -26,21 +28,12 @@ class HealthCheckRedeploy:
             raise Exception("Service not found.")
         self.service = services[0]
 
-        if healthCheck is not None:
-            self.healthCheck = healthCheck
-
-        if healthCheckPort is not None:
-            self.healthCheckPort = healthCheckPort
-
-        if healthCheckUrlPath is not None:
-            self.healthCheckUrlPath = healthCheckUrlPath
-
-        if healthCheckTimeout is not None:
-            self.healthCheckTimeout = healthCheckTimeout
-
     def start(self):
 
         print ">> starting redeploy"
+
+        self.completedHealthChecks = 0
+        self.containers = []
 
         for container in dockercloud.Container.list(service=self.service.resource_uri):
             if container.state in ['Running', 'Starting']:
@@ -91,6 +84,9 @@ class HealthCheckRedeploy:
 
     def checkHealth(self, container):
 
+        if self.healthCheckContainersCount is not None and self.completedHealthChecks >= self.healthCheckContainersCount:
+            return
+
         if self.healthCheck in 'http':
             url = None
             for port in container.container_ports:
@@ -112,6 +108,8 @@ class HealthCheckRedeploy:
             print 'tcp health check on', container.public_dns + ':' + str(outerPort) + ' ',
             self.checkHealthLoop(lambda: self.checkHealthTcp(container.public_dns, outerPort))
 
+        self.completedHealthChecks += 1;
+
     def checkHealthLoop(self, callback):
 
         startTimestamp = time.time()
@@ -121,7 +119,7 @@ class HealthCheckRedeploy:
             sys.stdout.write('.')
             sys.stdout.flush()
             try:
-                if callback():
+                if callback():                    
                     print ' OK'
                     return
             except Exception:
@@ -140,6 +138,30 @@ class HealthCheckRedeploy:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         return sock.connect_ex((host, port)) == 0
 
+    def setHealthCheck(self, healthCheck):
+
+        if healthCheck not in ['off', 'http', 'tcp']:
+            sys.exit("Health check '%s' not implemented." % arg)
+
+        self.healthCheck = healthCheck
+
+    def setHealthCheckPort(self, healthCheckPort):
+        
+        self.healthCheckPort = healthCheckPort
+
+    def setHealthCheckUrlPath(self, healthCheckUrlPath):
+
+        self.healthCheckUrlPath = healthCheckUrlPath
+
+    def setHealthCheckContainersCount(self, healthCheckContainersCount):
+
+        self.healthCheckContainersCount = healthCheckContainersCount
+
+    def setHealthCheckTimeout(self, healthCheckTimeout):
+        
+        self.healthCheckTimeout = healthCheckTimeout
+
+
 
 def terminate(message):
 
@@ -152,6 +174,7 @@ def terminate(message):
     print '    [-p=|--health-check-port=port-number]'
     print '    [-u=|--health-check-url-path=url-path]'
     print '    [-t=|--health-check-timeout=timeout]'
+    print '    [-c=|--health-check-containers-count]'
     print '    [-m=|--maximum-execution-time=time]'
     sys.exit(1)
 
@@ -162,16 +185,11 @@ def onTimeout(signum, frame):
 
 service = None
 stack = None
-healthCheck = None
-healthCheckPort = None
-healthCheckUrlPath = None
-healthCheckTimeout = None
-maximumExecutionTime = None
 
 opts, args = getopt.getopt(
     sys.argv[1:],
-    "s:k:h:p:u:t:m:",
-    ["service=", "stack=", "health-check=", "health-check-port=", "health-check-url-path=", "health-check-timeout=", "maximum-execution-time="]
+    "s:k:h:p:u:t:c:m:",
+    ["service=", "stack=", "health-check=", "health-check-port=", "health-check-url-path=", "health-check-timeout=", "health-check-containers-count", "maximum-execution-time="]
 )
 
 for opt, arg in opts:
@@ -179,29 +197,33 @@ for opt, arg in opts:
         service = arg
     elif opt in ('-k', '--stack'):
         stack = arg
-    elif opt in ('-h', '--health-check'):
-        if arg not in ['off', 'http', 'tcp']:
-            terminate("Health check '%s' not implemented." % arg)
-        healthCheck = arg
-    elif opt in ('-p', '--health-check-port'):
-        healthCheckPort = int(arg)
-    elif opt in ('-u', '--health-check-url-path'):
-        healthCheckUrlPath = arg
-    elif opt in ('-t', '--health-check-timeout'):
-        healthCheckTimeout = int(arg)
-    elif opt in ('-m', '--maximum-execution-time'):
-        maximumExecutionTime = arg
-    else:
-        terminate("Unknown option " + opt + ".")
 
 if service is None:
     terminate("Missing mandatory argument: --service")
 if stack is None:
     terminate("Missing mandatory argument: --stack")
 
-if maximumExecutionTime is not None:
-    signal.signal(signal.SIGALRM, onTimeout)
-    signal.alarm(maximumExecutionTime)
+redeploy = HealthCheckRedeploy(stack, service)
 
-redeploy = HealthCheckRedeploy(stack, service, healthCheck, healthCheckPort, healthCheckUrlPath, healthCheckTimeout)
+for opt, arg in opts:
+    if opt in ('-s', '--service'):
+        pass
+    elif opt in ('-k', '--stack'):
+        pass
+    elif opt in ('-h', '--health-check'):
+        redeploy.setHealthCheck(arg)
+    elif opt in ('-p', '--health-check-port'):
+        redeploy.setHealthCheckPort(int(arg))
+    elif opt in ('-u', '--health-check-url-path'):
+        redeploy.setHealthCheckUrlPath(arg)
+    elif opt in ('-t', '--health-check-timeout'):
+        redeploy.setHealthCheckTimeout(int(arg))
+    elif opt in ('-c', '--health-check-containers-count'):
+        redeploy.setHealthCheckContainersCount(int(arg))
+    elif opt in ('-m', '--maximum-execution-time'):
+        signal.signal(signal.SIGALRM, onTimeout)
+        signal.alarm(int(arg))
+    else:
+        terminate("Unknown option " + opt + ".")
+
 redeploy.start()

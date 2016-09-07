@@ -16,13 +16,14 @@ The script requires [python-docker-cloud]() Python library. It can be installed 
 The script synopsis is:
 
 ```
-DOCKERCLOUD_USER=username DOCKERCLOUD_APIKEY=apikey ./zero-downtime-redeploy.py
+DOCKERCLOUD_USER=username DOCKERCLOUD_APIKEY=apikey ./health-check-redeploy.py
     -t=|--stack=stack-name
     -s=|--service=service-name
     [-h=|--health-check=off|http|tcp]
     [-p=|--health-check-port=port-number]
     [-u=|--health-check-url-path=url-path]
     [-t=|--health-check-timeout=timeout]
+    [-c=|--health-check-containers-count]
     [-m=|--maximum-execution-time=time]
 ```
 
@@ -51,6 +52,11 @@ performed on the corresponding outer port.
 : URL path to perform the HTTP health check on (default /). If you have a subpage for performing
 the health check, specify its path here.
 
+-c, --health-check-containers-count
+: Perform the health check on the specified number of containers only. The remaining containers
+will be redeployed without further health check on them. By default the health check is performed
+on all redeployed containers.
+
 -t=timeout, --health-check-timeout=timeout
 : Maximum time to perform the health check on single container for.
  
@@ -59,5 +65,5 @@ the health check, specify its path here.
 Redeploy service *api-gateway* from stack *my-project* and perform HTTP health check
 on the default port 80:
 
-    ./zero-downtime-redeploy.py --stack=my-project --service=api-gateway --health-check=http
+    ./health-check-redeploy.py --stack=my-project --service=api-gateway --health-check=http
 
